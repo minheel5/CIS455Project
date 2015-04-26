@@ -1,9 +1,12 @@
 package crawler;
 
+import java.util.LinkedList;
+
 public class Document {
 	private String page;
 	private String url;
 	private int size;
+	private LinkedList<String> outboundLinks;
 	
 	public String getPage() {
 		return page;
@@ -28,4 +31,13 @@ public class Document {
 	public void setSize(int size) {
 		this.size = size;
 	}
+	
+	public LinkedList<String> getOutboundLinks(){
+		return outboundLinks;
+	}
+	
+	public void setOutboundLinks(LinkedList<String> outboundLinks){
+		this.outboundLinks = outboundLinks;
+	}
+	
 }
