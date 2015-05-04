@@ -4,31 +4,46 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.net.UnknownHostException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import javax.servlet.ServletConfig;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.apache.log4j.Logger;
 
 
 
-public class Crawler implements Runnable {
-	
-	private static final Logger logger = Logger.getLogger(Crawler.class.getName());
+public class CrawlerServlet extends HttpServlet {
+
+	private static final long serialVersionUID = -8880453577790015442L;
+
+	private static final Logger logger = Logger.getLogger(CrawlerServlet.class.getName());
 	
 	private static DatabaseWrapper db;
 	
-	private int pageLimit;
+	private static int pageLimit = 100000;
 	private int searchedPageNum;
 	
 	public Set<String> seenURLs;
@@ -37,34 +52,125 @@ public class Crawler implements Runnable {
 	public LinkedList<String> searchURLs;
 	public LinkedList<Document> docs;
 	
-	private CrawlerMaster master;
-	
+	String masterAddr;
+	int masterPort;
+	String storageDir;
 
-	public Crawler(CrawlerMaster master, int pageLimit, Set<byte[]> seenDigests, Set<String> seenURLs, String seed){
-		this.seenURLs = seenURLs;
+	public void init(){
+		ServletConfig cfg = getServletConfig();
+		String master = cfg.getInitParameter("master");
+		storageDir = cfg.getInitParameter("storagedir");
+		String[] masterSplit = master.split(":");
+		if (masterSplit.length < 2) {
+			System.out.println("invalid master in web.xml");
+			System.exit(0);
+		}
+		masterAddr = masterSplit[0];
+		masterPort = Integer.parseInt(masterSplit[1]);
+  
 		this.searchURLs = new LinkedList<String>();
-		searchURLs.add(seed);
-		this.seenDigests = seenDigests;
-		this.pageLimit = pageLimit;
+		this.seenURLs = new HashSet<String>();
+		this.seenDigests = new HashSet<byte[]>();
 		this.searchedPageNum = 0;
 		this.docs = new LinkedList<Document>();
-		this.master = master;
-		//if(db != null){
-			try {
-				db = new DatabaseWrapper("database");
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-		//}
+		try {
+			db = new DatabaseWrapper(storageDir);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 		
-	}
-	
-	public void run(){
 		Timer timer = new Timer();
 		timer.schedule(new runCrawler(), 0, 1000);
 		
 	}
 	
+	// - send post request to send extracted links to master /send 
+	
+	public void doPost(HttpServletRequest request, HttpServletResponse response) {
+		if(request.getRequestURI().endsWith("/distribute")) {
+			String links = request.getParameter("links");
+			searchURLs.addAll(Arrays.asList(links.split(" ")));
+			
+		}
+		else if(request.getRequestURI().endsWith("/seed")) {
+			String seed = request.getParameter("seed");
+			searchURLs.add(seed);
+		}
+		
+		
+	}
+	
+	public void doGet(HttpServletRequest request, HttpServletResponse response) {
+		LinkedList<Document> docs = db.getAllDocuments();
+		JSONObject obj = new JSONObject();
+		JSONArray arr = new JSONArray();
+		
+		response.setContentType("application/json");
+		
+		if(request.getRequestURI().endsWith("/crawled_pages")) {
+			for (Document doc: docs){
+				try {
+					obj.put("url", doc.getUrl());
+					StringBuffer sb = new StringBuffer();
+					for (String link: doc.getOutboundLinks()) sb.append(link + " ");
+					obj.put("outboundlinks", sb.toString());
+					obj.put("page", doc.getPage());
+					obj.put("size", doc.getSize());
+					arr.put(obj);
+				} catch (JSONException e) {
+					e.printStackTrace();
+				}
+				
+				obj = new JSONObject();
+			}
+			try {
+				Socket socket = new Socket(request.getRemoteAddr(), request.getRemotePort());
+				PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()));
+				out.write(arr.toString());
+				out.flush();
+			    socket.close();
+			} catch (UnknownHostException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			} catch (IOException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
+		    
+		}
+		else if(request.getRequestURI().endsWith("/outboundlinks")) {
+			for (Document doc: docs){
+				try {
+					obj.put("url", doc.getUrl());
+					StringBuffer sb = new StringBuffer();
+					for (String link: doc.getOutboundLinks()) sb.append(link + " ");
+					obj.put("outboundlinks", sb.toString());
+					arr.put(obj);
+				} catch (JSONException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				
+				obj = new JSONObject();
+			}
+			try {
+				Socket socket = new Socket(request.getRemoteAddr(), request.getRemotePort());
+				PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()));
+				out.write(arr.toString());
+				out.flush();
+			    socket.close();
+			} catch (UnknownHostException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			} catch (IOException e1) {
+				// TODO Auto-generated catch block
+				e1.printStackTrace();
+			}
+		}
+		
+		
+		
+	}
 	class runCrawler extends TimerTask {
 		public void run() {
 			if(searchedPageNum < pageLimit && !searchURLs.isEmpty()){
@@ -79,6 +185,33 @@ public class Crawler implements Runnable {
 			}
 				
 		}
+	}
+	
+	private void sendLinks(LinkedList<String> links){
+		String st = "";
+		for(String link : links) st += link + " ";
+		
+		try {
+			Socket socket = new Socket(masterAddr, masterPort);
+			PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()));
+			String params = "links=" + st;
+			if(searchedPageNum == 0) params += "&first=true";
+			
+	        String message = "POST /master/send HTTP/1.0\r\n";
+	        message += "Content-Type: application/x-www-form-urlencoded \r\n";
+	        message += "Content-Length: " + params.length() + "\r\n\r\n";
+	        message += params;
+	        out.println(message);
+	        out.flush();
+	        socket.close();
+		} catch (UnknownHostException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
 	}
 	
 	private void processURL(String url) {
@@ -109,6 +242,7 @@ public class Crawler implements Runnable {
 		}
 			
 		int fileLength = connection.getContentLength();
+		long lastModified = connection.getLastModified();
 		connection.disconnect();
 		
 		BufferedReader br;
@@ -147,15 +281,16 @@ public class Crawler implements Runnable {
 		if(hasSeenDigest(digest)) return;
 		
 		seenDigests.add(digest);
-		LinkedList<String>links = extractLinks(file, url);
+		LinkedList<String> links = extractLinks(file, url);
 		//logger.debug("sending " + links.size() + " links to master");
-		master.sendLinks(links);
+		sendLinks(links);
 		
 		Document doc = new Document();
 		doc.setPage(file);
 		doc.setUrl(url);
 		doc.setSize(fileLength);
 		doc.setOutboundLinks(links);
+		//doc.setTime(System.currentTimeMillis());
 		
 		
 		try {
@@ -272,9 +407,5 @@ public class Crawler implements Runnable {
 		return true;
 	}
 	
-	public void assignLinks(LinkedList<String> urls){
-		//synchronized(searchURLS)
-		searchURLs.addAll(urls);
-		
-	}
+
 }
