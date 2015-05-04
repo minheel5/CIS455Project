@@ -23,7 +23,7 @@ import org.apache.log4j.Logger;
 
 public class CrawlerMasterServlet extends HttpServlet  {
 
-	//private static final Logger logger = Logger.getLogger(CrawlerMasterServlet.class.getName());
+	private static final Logger logger = Logger.getLogger(CrawlerMasterServlet.class.getName());
 
 	private static final long serialVersionUID = 4568808849713803401L;
 	
@@ -39,6 +39,7 @@ public class CrawlerMasterServlet extends HttpServlet  {
 		this.linksToShuffle = new LinkedList<String>();
 		this.crawlers = new LinkedList<CrawlerInfo>();
 		
+		logger.info("crawler initialized");
 		Timer timer = new Timer();
 		timer.schedule(new shuffleLinks(), 0, 20000);
 
@@ -93,7 +94,7 @@ public class CrawlerMasterServlet extends HttpServlet  {
 				e.printStackTrace();
 			}
 			for (int i = 0; i < numCrawlers; i++) {
-				if (links[i].length() != 0) {
+				if (links[i] != null && links[i].length() != 0) {
 					//send to crawlerServlet
 					try {
 						CrawlerInfo c = crawlers.get(i);
@@ -106,6 +107,7 @@ public class CrawlerMasterServlet extends HttpServlet  {
 				        message += "Content-Length: " + params.length() + "\r\n\r\n";
 				        message += params;
 				        out.println(message);
+				        logger.info(message);
 				        out.flush();
 				        socket.close();
 					}catch (UnknownHostException e) {

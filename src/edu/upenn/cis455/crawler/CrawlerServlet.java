@@ -73,20 +73,18 @@ public class CrawlerServlet extends HttpServlet {
 		this.seenDigests = new HashSet<byte[]>();
 		this.searchedPageNum = 0;
 		this.docs = new LinkedList<Document>();
-		try {
-			db = new DatabaseWrapper(storageDir);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
 		
+		logger.info("crawler initialized");
 		Timer timer = new Timer();
 		timer.schedule(new runCrawler(), 0, 1000);
+		timer.schedule(new updateDB(), 0, 10000);
 		
 	}
 	
 	// - send post request to send extracted links to master /send 
 	
 	public void doPost(HttpServletRequest request, HttpServletResponse response) {
+		logger.info("crawler received a post request");
 		if(request.getRequestURI().endsWith("/distribute")) {
 			String links = request.getParameter("links");
 			searchURLs.addAll(Arrays.asList(links.split(" ")));
@@ -96,7 +94,6 @@ public class CrawlerServlet extends HttpServlet {
 			String seed = request.getParameter("seed");
 			searchURLs.add(seed);
 		}
-		
 		
 	}
 	
@@ -187,6 +184,28 @@ public class CrawlerServlet extends HttpServlet {
 		}
 	}
 	
+	class updateDB extends TimerTask {
+		public void run() {
+			if(!docs.isEmpty()){
+				try {
+					logger.debug("starting to add db entry");
+					db = new DatabaseWrapper(storageDir);
+					for(Document doc : docs) db.addDocument(doc);
+					logger.info(searchedPageNum + " doc added to db");
+					db.close();
+				} catch (Exception e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				logger.debug("done");
+				docs.clear();
+			}
+			
+			
+				
+		}
+	}
+	
 	private void sendLinks(LinkedList<String> links){
 		String st = "";
 		for(String link : links) st += link + " ";
@@ -202,6 +221,7 @@ public class CrawlerServlet extends HttpServlet {
 	        message += "Content-Length: " + params.length() + "\r\n\r\n";
 	        message += params;
 	        out.println(message);
+	        logger.info(message);
 	        out.flush();
 	        socket.close();
 		} catch (UnknownHostException e) {
@@ -215,7 +235,7 @@ public class CrawlerServlet extends HttpServlet {
 	}
 	
 	private void processURL(String url) {
-		//logger.info("processing link: " + url);
+		logger.info("processing link: " + url);
 		if(seenURLs.contains(url)) return; //check last modified?
 		seenURLs.add(url);
 		
@@ -266,7 +286,7 @@ public class CrawlerServlet extends HttpServlet {
 		}
 		
 		String file = sb.toString();
-		//logger.info("retrieved file");
+		logger.info("retrieved file");
 		
 		byte[] digest = null;
 		try {
@@ -282,7 +302,7 @@ public class CrawlerServlet extends HttpServlet {
 		
 		seenDigests.add(digest);
 		LinkedList<String> links = extractLinks(file, url);
-		//logger.debug("sending " + links.size() + " links to master");
+		logger.debug("sending " + links.size() + " links to master");
 		sendLinks(links);
 		
 		Document doc = new Document();
@@ -292,29 +312,18 @@ public class CrawlerServlet extends HttpServlet {
 		doc.setOutboundLinks(links);
 		//doc.setTime(System.currentTimeMillis());
 		
-		
-		try {
-			//logger.debug("starting to add db entry");
-			db.addDocument(doc);
-			logger.info(searchedPageNum + " doc added to db");
-		} catch (Exception e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-		//logger.debug("done");
-		
-		//logger.debug("doc created");
-		//logger.debug("url: " + doc.getUrl());
-		//logger.debug("page: " + doc.getPage());
+		logger.debug("doc created");
+		logger.debug("url: " + doc.getUrl());
+		logger.debug("page: " + doc.getPage());
 		
 		docs.add(doc);
 		searchedPageNum++;
-		//logger.debug("searched: " + searchedPageNum);
+		logger.debug("searched: " + searchedPageNum);
 
 	}
 	
 	private LinkedList<String> extractLinks(String file, String url){
-		//logger.info("extracting links");
+		logger.info("extracting links");
 		LinkedList<String> links = new LinkedList<String>();
 		String path;
 		if (url.indexOf("/", url.indexOf("://") + "://".length()) > -1) path = url;
